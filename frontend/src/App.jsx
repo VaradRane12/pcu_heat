@@ -6,7 +6,7 @@ import HotspotsList from "./components/HotspotsList";
 import RankingPanel from "./components/RankingPanel";
 import "./index.css";
 
-const API = "http://localhost:8000";
+const API = "https://chat.varadrane.xyz/";
 
 export default function App() {
   const [gridData, setGridData] = useState(null);
