@@ -6,7 +6,19 @@ import HotspotsList from "./components/HotspotsList";
 import RankingPanel from "./components/RankingPanel";
 import "./index.css";
 
-const API = "https://chat.varadrane.xyz/";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
+
+function apiUrl(path) {
+  return `${API_BASE}/${String(path).replace(/^\/+/, "")}`;
+}
+
+async function fetchJSON(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status}) for ${url}`);
+  }
+  return response.json();
+}
 
 export default function App() {
   const [gridData, setGridData] = useState(null);
@@ -17,16 +29,35 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [simLoading, setSimLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("simulate"); // simulate | rank
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${API}/api/grid`).then((r) => r.json()),
-      fetch(`${API}/api/hotspots`).then((r) => r.json()),
-    ]).then(([grid, hs]) => {
-      setGridData(grid);
-      setHotspots(hs.hotspots);
-      setLoading(false);
-    });
+    let mounted = true;
+
+    const loadData = async () => {
+      try {
+        const [grid, hs] = await Promise.all([
+          fetchJSON(apiUrl("api/grid")),
+          fetchJSON(apiUrl("api/hotspots")),
+        ]);
+
+        if (!mounted) return;
+        setGridData(grid);
+        setHotspots(hs.hotspots || []);
+        setError("");
+      } catch (err) {
+        if (!mounted) return;
+        setError("Unable to load backend data. Start backend on http://localhost:8000 or set VITE_API_BASE_URL.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadData();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleCellSelect = useCallback(async (cell) => {
@@ -34,27 +65,36 @@ export default function App() {
     setSimulationResult(null);
     setRankings(null);
     // Auto-fetch rankings
-    const res = await fetch(`${API}/api/ranking/${cell.id}`);
-    const data = await res.json();
-    setRankings(data);
+    try {
+      const data = await fetchJSON(apiUrl(`api/ranking/${cell.id}`));
+      setRankings(data);
+      setError("");
+    } catch (err) {
+      setError("Failed to fetch rankings for the selected zone.");
+    }
   }, []);
 
   const handleSimulate = useCallback(
     async (interventionType, units) => {
       if (!selectedCell) return;
       setSimLoading(true);
-      const res = await fetch(`${API}/api/simulate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cell_id: selectedCell.id,
-          intervention_type: interventionType,
-          units,
-        }),
-      });
-      const data = await res.json();
-      setSimulationResult(data);
-      setSimLoading(false);
+      try {
+        const data = await fetchJSON(apiUrl("api/simulate"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cell_id: selectedCell.id,
+            intervention_type: interventionType,
+            units,
+          }),
+        });
+        setSimulationResult(data);
+        setError("");
+      } catch (err) {
+        setError("Simulation failed. Check backend connectivity and try again.");
+      } finally {
+        setSimLoading(false);
+      }
     },
     [selectedCell]
   );
@@ -64,6 +104,14 @@ export default function App() {
       <div className="loader-screen">
         <div className="loader-pulse" />
         <p>Ingesting satellite thermal data...</p>
+      </div>
+    );
+  }
+
+  if (error && !gridData) {
+    return (
+      <div className="loader-screen">
+        <p>{error}</p>
       </div>
     );
   }
@@ -96,6 +144,7 @@ export default function App() {
 
         {/* Right: intervention & results */}
         <main className="right-panel">
+          {error && <p className="panel-desc">{error}</p>}
           {!selectedCell ? (
             <div className="empty-state">
               <div className="empty-icon">📡</div>
